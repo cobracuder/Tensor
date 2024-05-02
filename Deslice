@@ -1,0 +1,35 @@
+#include<bits/stdc++.h>
+using namespace std;
+class Tensor{
+    public:
+    vector<int>data;
+    vector<int>dims;
+    Tensor(int n, vector<int>dat, vector<int>dim){
+        data.resize(n+1, 0);
+        data = dat;
+        dims = dim;
+    }
+    void display(){
+        for(int i=0;i<dims[1]*dims[0];i++){
+            cout<<data[i]<<" ";
+            if((i+1)%10 == 0){
+                cout<<endl;
+            }
+        }
+    }
+};
+
+void deslice(Tensor &src, Tensor &dst, int row, int col,vector<int>offset) {
+    for(int i=0;i<row;i++){
+        for(int j=0;j<col;j++){
+            int64_t ind= (offset[0] + i)* dst.dims[1] + (offset[1] + j); 
+            dst.data[ind] = src.data[i * col + j];
+        }
+    }
+}
+int main(){
+    Tensor src(10, vector<int>(10,1),{2,5});
+    Tensor dst(100, vector<int>(100, 0), {10, 10});
+    deslice(src,dst,2,2,{0,0});
+    dst.display();
+}
