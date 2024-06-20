@@ -1,0 +1,26 @@
+#include<bits/stdc++.h>
+using namespace std;
+template <typename T>
+
+void contigous(int dim, int64_t index, vector<int64_t>strides, vector<int64_t>shape, vector<T>&dst, T *src){
+    if(dim == shape.size()){
+        dst.push_back(src[index]);
+        return;
+    }
+
+    for (int i = 0; i < shape[dim]; i++){
+        contigous(dim + 1, index + strides[dim] * i , strides, shape, dst, src);
+    }
+}
+
+int main(){
+    vector<int64_t>shape = {4,2,2};
+    vector<int64_t>strides = {8,4,1};
+    int src[] = {1,2,3,4,5,6,7,8,9,0,11,12,13,14,15,16};
+    vector<int>out;
+    contigous(0,0,strides,shape,out,src);
+    for (auto i: out){
+        cout<<i<<" ";
+    }
+    
+}
