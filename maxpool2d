@@ -2,6 +2,7 @@
 using namespace std;
 #define DEBUG_OPTION 1
 
+namespace cobra{
 /*----------- mdspan struct ---------*/
 template<typename T>
 struct md_span {
@@ -109,6 +110,7 @@ void sliced(md_span<T> *des, md_span<T> *source,
     cpy(0, 0, 0, des_st, src_st, des->shape, source->shape, rank,
         des->data, source->data, src_offset, dst_offset);
 } // sliced
+}
 
 /*--------- Max Pool function ----------*/
 struct op_para {
@@ -130,8 +132,8 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
                 }
 
                 int mx = INT_MIN;
-                for (int l = 0, d_l = 0; l < para.kernel[0]; l++, d_l += para.dailation[0]) {
-                    for (int m = 0, d_m = 0; m < para.kernel[1]; m++, d_m += para.dailation[1]) {
+                for (int l = 0, d_l = 0; l < para.kernel[0]; l++, d_l += (para.dailation[0] + 1)) {
+                    for (int m = 0, d_m = 0; m < para.kernel[1]; m++, d_m += (para.dailation[1] + 1)) {
                         if ((k + d_m < h) && (i + d_l < c)) {
                             mx = max(mx, in[(j * (h * c)) + ((k + d_m) * c) + i + d_l]);
                         }
@@ -141,11 +143,12 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
             }
         }
     }
-}
+}  // cobra
 
 /******************************************************************************************/
 
 int main() {
+    using namespace cobra;
     vector<int> arr(100, 0);
     vector<int> src(125);
     vector<int> out(100, INT_MIN);
@@ -153,13 +156,13 @@ int main() {
 
     /*------------------ INITIALIZE PARA ----------------*/
     op_para para;
-    para.kernel[0] = 1;
-    para.kernel[1] = 1;
+    para.kernel[0] = 2;
+    para.kernel[1] = 2;
     para.ceil_mode = 1;
     para.stride[0] = 1;
     para.stride[1] = 1;
-    para.dailation[0] = 1;
-    para.dailation[1] = 1;
+    para.dailation[0] = 0;
+    para.dailation[1] = 0;
 
     /*------------------- mdspan setup -------------------*/
     md_span<int> ob1{arr.data(), {3, 5, 5}};
