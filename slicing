@@ -56,10 +56,13 @@ void dis(int dim, int idx, T *data, vector<int>st, vector<int>sh, int rank) {
         std::cout<<data[idx]<<", ";
         return;
     }
+    
+    std::cout<<"[ ";
     for (int i = 0; i < sh[dim]; i++) {
         dis(dim + 1, idx + st[dim] * i, data, st, sh, rank);
     }
-    std::cout<<"\n";
+    std::cout<<"]\n";
+
 } //dis
 
 template<typename T>
@@ -114,11 +117,12 @@ void sliced(md_span<T> *des, md_span<T> *source,
 } //sliced
 
 int main() {
-    vector<int>arr(9,0);
-    vector<int>src(200);
+    vector<int>arr(27,0);
+    vector<int>src(125);
     initialize(src);
-    md_span<int> *ob1 = new md_span<int>{arr.data(), {3, 3}};
-    md_span<int> *ob2 = new md_span<int>{src.data(), {5, 20}};
-    sliced<int>(ob1, ob2, {1, 1}, {0, 0});
+    md_span<int> *ob1 = new md_span<int>{arr.data(), {3, 3, 3}};
+    md_span<int> *ob2 = new md_span<int>{src.data(), {5, 5, 5}};
+    sliced<int>(ob1, ob2);
+    print(ob2);
     print(ob1);
 }
