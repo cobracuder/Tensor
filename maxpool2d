@@ -1,27 +1,27 @@
-#include<bits/stdc++.h>
+#include <bits/stdc++.h>
 using namespace std;
 #define DEBUG_OPTION 1
 
 /*----------- mdspan struct ---------*/
 template<typename T>
-struct md_span{
+struct md_span {
     T *data;
     vector<int> shape;
 };
 
 /*------- To initialize data ------*/
 template<typename T>
-void initialize(vector<T>&data) {
+void initialize(vector<T>& data) {
     int size = data.size();
-    for(int i = 0; i < size; i++) {
+    for (int i = 0; i < size; i++) {
         data[i] = i + 1;
     }
 } // initialize
 
 /*------- To Calc Stride -------*/
 template<typename T>
-auto cal_stride(vector<T>shape) {
-    vector<T>stride(shape.size(), 1);
+auto cal_stride(const vector<T>& shape) {
+    vector<T> stride(shape.size(), 1);
     for (int64_t i = shape.size() - 2; i >= 0; --i) {
         stride[i] = stride[i + 1] * shape[i + 1];
     }
@@ -30,143 +30,146 @@ auto cal_stride(vector<T>shape) {
 
 /*-------- print function ---------*/
 template<typename T>
-void print(vector<T>arr) {
+void print(const vector<T>& arr) {
     if (DEBUG_OPTION) {
-        std::cout<<endl;
-        for (auto i: arr) {
-            std::cout<<i<<", ";
+        std::cout << endl;
+        for (auto i : arr) {
+            std::cout << i << ", ";
         }
-        std::cout<<endl;
+        std::cout << endl;
     }
-} //print
+} // print
 
 template<typename T>
-void print(T s) {
+void print(const T& s) {
     if (DEBUG_OPTION) {
-        std::cout<<endl;
-        std::cout<<s;
-        std::cout<<endl;
+        std::cout << endl << s << endl;
     }
-} //print
+} // print
 
 /*----- To Print Multi-Dimension array ------*/
 template<typename T>
-void dis(int dim, int idx, T *data, vector<int>st, vector<int>sh, int rank) {
+void dis(int dim, int idx, T *data, const vector<int>& st, const vector<int>& sh, int rank) {
     if (dim == rank) {
-        std::cout<<data[idx]<<", ";
+        std::cout << data[idx] << ", ";
         return;
     }
-    
-    std::cout<<"[ ";
+
+    std::cout << "[ ";
     for (int i = 0; i < sh[dim]; i++) {
         dis(dim + 1, idx + st[dim] * i, data, st, sh, rank);
     }
-    std::cout<<"]\n";
-
-} //dis
+    std::cout << "]\n";
+} // dis
 
 template<typename T>
 void print(md_span<T> *ob) {
     if (DEBUG_OPTION) {
-        std::cout<<endl;
-        std::cout<<"Shape: \n";
-        for (auto i: ob->shape) {
-            std::cout<<i<<", ";
+        std::cout << "\nShape: \n";
+        for (auto i : ob->shape) {
+            std::cout << i << ", ";
         }
-        std::cout<<"\nDATA: \n";
+        std::cout << "\nDATA: \n";
         dis(0, 0, ob->data, cal_stride(ob->shape), ob->shape, ob->shape.size());
-        std::cout<<endl;
+        std::cout << endl;
     }
-}  // print
+} // print
 
 /*--------- cpy function ------------*/
 template<typename T1, typename T2>
-void cpy(int dim, int dst, int src, vector<T1> dst_st, vector<T1> src_st,
-         vector<T1> dst_sh, vector<T1> src_sh, int rank, T2 *out, T2 *in,
-         vector<int>src_offset, vector<int>dst_offset){
-    if(dim == rank){
+void cpy(int dim, int dst, int src, const vector<T1>& dst_st, const vector<T1>& src_st,
+         const vector<T1>& dst_sh, const vector<T1>& src_sh, int rank, T2 *out, T2 *in,
+         const vector<int>& src_offset, const vector<int>& dst_offset) {
+    if (dim == rank) {
         out[dst] = in[src];
         return;
     }
-    for(int i = dst_offset[dim], j = src_offset[dim];
-        i < dst_sh[dim] && j < src_sh[dim]; i++, j++){
-        cpy(dim + 1, (dst + dst_st[dim] * i), 
-            (src + src_st[dim] * (j)),
+    for (int i = dst_offset[dim], j = src_offset[dim];
+         i < dst_sh[dim] && j < src_sh[dim]; i++, j++) {
+        cpy(dim + 1, dst + dst_st[dim] * i, src + src_st[dim] * j,
             dst_st, src_st, dst_sh, src_sh, rank, out, in, src_offset, dst_offset);
     }
-} //cpy
+} // cpy
 
 /*--------- slice function ----------*/
 template<typename T>
 void sliced(md_span<T> *des, md_span<T> *source,
-            vector<int> dst_offset = {},
-            vector<int> src_offset = {}) {
+            vector<int> dst_offset = {}, vector<int> src_offset = {}) {
     auto des_st = cal_stride(des->shape);
     auto src_st = cal_stride(source->shape);
     int rank = des_st.size();
 
-    if (dst_offset.size() == 0) {
+    if (dst_offset.empty()) {
         dst_offset.resize(rank, 0);
     }
-    if (src_offset.size() == 0) {
+    if (src_offset.empty()) {
         src_offset.resize(rank, 0);
     }
 
     cpy(0, 0, 0, des_st, src_st, des->shape, source->shape, rank,
         des->data, source->data, src_offset, dst_offset);
-} //sliced
-/******************************************************************************************/
+} // sliced
 
-struct op_para{
+/*--------- Max Pool function ----------*/
+struct op_para {
     int kernel[3];
     bool ceil_mode;
     int stride[2];
+    int dailation[2];
 };
 
 template<typename T>
-void maxpool_cfunc(T *out, T *in, int h, int w, int c, op_para para) {
-        int count = 0;
-        for (int j = 0; j < w; j++) {
-            for (int k = 0; k < h; k += para.stride[0]) {
-               for (int i = 0; i < c; i += para.stride[1]) {
+void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
+    int count = 0;
+    for (int j = 0; j < w; j++) {
+        for (int k = 0; k < h; k += para.stride[0]) {
+            for (int i = 0; i < c; i += para.stride[1]) {
+                if (!((k + para.kernel[1] < h) && (i + para.kernel[0] < c) || para.ceil_mode)) {
+                    count++;
+                    continue;
+                }
+
                 int mx = INT_MIN;
-                for(int l = 0; l < para.kernel[0]; l++) {
-                    for (int m = 0; m < para.kernel[1]; m++) {
-                        if((k + m < h) && (i + l < c)) {
-                           mx = max(mx, in[(j) * (w * c) + (k + m) * (c) + i + l]);
+                for (int l = 0, d_l = 0; l < para.kernel[0]; l++, d_l += para.dailation[0]) {
+                    for (int m = 0, d_m = 0; m < para.kernel[1]; m++, d_m += para.dailation[1]) {
+                        if ((k + d_m < h) && (i + d_l < c)) {
+                            mx = max(mx, in[(j * (w * c)) + ((k + d_m) * c) + i + d_l]);
                         }
                     }
                 }
-                
-                if(((k + para.kernel[1] < h) && (i + para.kernel[0] < c)) || (para.ceil_mode)) {
-                    out[count] = mx;
-                }
+                out[count] = mx;
                 count++;
             }
         }
     }
 }
 
+/******************************************************************************************/
+
 int main() {
-    vector<int>arr(27,0);
-    vector<int>src(125);
-    vector<int> out(27, INT_MIN);
+    vector<int> arr(100, 0);
+    vector<int> src(125);
+    vector<int> out(100, INT_MIN);
     initialize(src);
-    md_span<int> *ob1 = new md_span<int>{arr.data(), {3, 3, 3}};
-    md_span<int> *ob2 = new md_span<int>{src.data(), {3, 3, 3}};
-    md_span<int> *out3 = new md_span<int>{out.data(), {3, 3, 3}};
-    sliced<int>(ob1, ob2, {0, 0, 0});
+
+    md_span<int> ob1{arr.data(), {3, 5, 5}};
+    md_span<int> ob2{src.data(), {3, 5, 5}};
+    md_span<int> out3{out.data(), {3, 5, 5}};
+
+    sliced<int>(&ob1, &ob2, {0, 0, 0});
+
     op_para para;
-    para.kernel[0] = 1;
-    para.kernel[1] = 1;
+    para.kernel[0] = 2;
+    para.kernel[1] = 2;
     para.ceil_mode = 1;
     para.stride[0] = 1;
     para.stride[1] = 1;
-    maxpool_cfunc(out.data(), arr.data(), 3, 3, 3, para);
-    print(out3);
-    print(ob2);
+    para.dailation[0] = 2;
+    para.dailation[1] = 2;
 
-    // print(ob2);
-    // print(ob1);
+    maxpool_cfunc(out.data(), arr.data(), 3, 5, 5, para);
+    print(&out3);
+    print(&ob2);
 
+    return 0;
 }
