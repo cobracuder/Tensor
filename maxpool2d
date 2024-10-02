@@ -120,12 +120,12 @@ struct op_para {
 
 template<typename T>
 void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
-    int count = 0;
+    int count = -1;
     for (int j = 0; j < w; j++) {
         for (int k = 0; k < h; k += para.stride[0]) {
             for (int i = 0; i < c; i += para.stride[1]) {
+                count++;
                 if (!((k + para.kernel[1] < h) && (i + para.kernel[0] < c) || para.ceil_mode)) {
-                    count++;
                     continue;
                 }
 
@@ -133,12 +133,11 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
                 for (int l = 0, d_l = 0; l < para.kernel[0]; l++, d_l += para.dailation[0]) {
                     for (int m = 0, d_m = 0; m < para.kernel[1]; m++, d_m += para.dailation[1]) {
                         if ((k + d_m < h) && (i + d_l < c)) {
-                            mx = max(mx, in[(j * (w * c)) + ((k + d_m) * c) + i + d_l]);
+                            mx = max(mx, in[(j * (h * c)) + ((k + d_m) * c) + i + d_l]);
                         }
                     }
                 }
                 out[count] = mx;
-                count++;
             }
         }
     }
@@ -152,21 +151,25 @@ int main() {
     vector<int> out(100, INT_MIN);
     initialize(src);
 
-    md_span<int> ob1{arr.data(), {3, 5, 5}};
-    md_span<int> ob2{src.data(), {3, 5, 5}};
-    md_span<int> out3{out.data(), {3, 5, 5}};
-
-    sliced<int>(&ob1, &ob2, {0, 0, 0});
-
+    /*------------------ INITIALIZE PARA ----------------*/
     op_para para;
-    para.kernel[0] = 2;
-    para.kernel[1] = 2;
+    para.kernel[0] = 1;
+    para.kernel[1] = 1;
     para.ceil_mode = 1;
     para.stride[0] = 1;
     para.stride[1] = 1;
-    para.dailation[0] = 2;
-    para.dailation[1] = 2;
+    para.dailation[0] = 1;
+    para.dailation[1] = 1;
 
+    /*------------------- mdspan setup -------------------*/
+    md_span<int> ob1{arr.data(), {3, 5, 5}};
+    md_span<int> ob2{src.data(), {3, 5, 5}};
+    md_span<int> out3{out.data(), {3, 5, 5}};
+    
+    // slice call
+    sliced<int>(&ob1, &ob2, {0, 0, 0});
+
+    /*-------------------- cfunc call ---------------------*/
     maxpool_cfunc(out.data(), arr.data(), 3, 5, 5, para);
     print(&out3);
     print(&ob2);
