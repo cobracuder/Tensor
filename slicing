@@ -1,4 +1,3 @@
-
 #include<bits/stdc++.h>
 using namespace std;
 #define DEBUG_OPTION 1
@@ -27,7 +26,7 @@ template<typename T>
 void initialize(vector<T>&data) {
     int size = data.size();
     for(int i = 0; i < size; i++) {
-        data[i] = i;
+        data[i] = i + 1;
     }
 }
 
@@ -48,16 +47,17 @@ struct md_span{
 
 template<typename T1, typename T2>
 void cpy(int dim, int dst, int src, vector<T1> dst_st, vector<T1> src_st,
-vector<T1> dst_sh, vector<T1> src_sh, int rank, T2 *out, T2 *in){
+         vector<T1> dst_sh, vector<T1> src_sh, int rank, T2 *out, T2 *in,
+         vector<int>src_offset, vector<int>dst_offset){
     if(dim == rank){
         out[dst] = in[src];
-        // cout<<"\n hello "<<in[src + src_st[dim] * (src_sh[dim]==1?0:i)]<<" "<<src + src_st[dim] * (src_sh[dim]==1?1:i)<<endl;
         return;
     }
-    for(int i = 0; i < dst_sh[dim]; i++){
+    for(int i = dst_offset[dim], j = src_offset[dim];
+        i < dst_sh[dim] && j < src_sh[dim]; i++, j++){
         cpy(dim + 1, (dst + dst_st[dim] * i), 
-                  (src + src_st[dim] * (i)),
-                  dst_st, src_st, dst_sh, src_sh, rank, out, in);
+            (src + src_st[dim] * (j)),
+            dst_st, src_st, dst_sh, src_sh, rank, out, in, src_offset, dst_offset);
     }
 }
 
@@ -66,23 +66,16 @@ template<typename T>
 void sliced(md_span<T> *des, md_span<T> *source, vector<int> dst_offset = {}, vector<int>src_offset = {}) {
     auto des_st = cal_stride(des->shape);
     auto src_st = cal_stride(source->shape);
-    int src_off = 0;
-    for (auto i = 0; i < src_offset.size(); i++) {
-        src_off += src_st[i] * src_offset[i];
-    }
-    int dst_off = 0;
-    for (auto i = 0; i < dst_offset.size(); i++) {
-        dst_off += des_st[i] * dst_offset[i];
-    }
-    cpy(0, dst_off, src_off, des_st, src_st, des->shape, source->shape, des_st.size(), des->data, source->data);
+    
+    cpy(0, 0, 0, des_st, src_st, des->shape, source->shape, des_st.size(), des->data, source->data, src_offset, dst_offset);
 }
 
 int main() {
-    vector<int>arr(10,0);
-    vector<int>src(100);
+    vector<int>arr(9,0);
+    vector<int>src(200);
     initialize(src);
-    md_span<int> *ob1 = new md_span<int>{arr.data(), {5, 2}};
+    md_span<int> *ob1 = new md_span<int>{arr.data(), {3, 3}};
     md_span<int> *ob2 = new md_span<int>{src.data(), {5, 20}};
-    sliced<int>(ob1, ob2, {0, 0}, {0, 1});
+    sliced<int>(ob1, ob2, {1, 1}, {0, 0});
     print(arr);
 }
