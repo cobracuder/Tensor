@@ -144,13 +144,13 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
         for (int k = 0; k < h; k += para.stride[0]) {
             for (int i = 0; i < c; i += para.stride[1]) {
                 count++;
-                if (!((k + para.kernel[1] < h) && (i + para.kernel[0] < c) || para.ceil_mode)) {
+                if (!((k + para.dilated_kernel[1] < h) && (i + para.dilated_kernel[0] < c) || para.ceil_mode)) {
                     continue;
                 }
 
                 int mx = INT_MIN;
-                for (int l = 0, d_l = 0; l < para.kernel[0]; l++, d_l += (para.dilation[0])) {
-                    for (int m = 0, d_m = 0; m < para.kernel[1]; m++, d_m += (para.dilation[1])) {
+                for (int d_l = 0; d_l < para.dilated_kernel[0]; d_l += (para.dilation[0])) {
+                    for (int d_m = 0; d_m < para.dilated_kernel[1]; d_m += (para.dilation[1])) {
                         if ((k + d_m < h) && (i + d_l < c)) {
                             mx = max(mx, in[(j * (h * c)) + ((k + d_m) * c) + i + d_l]);
                         }
@@ -187,9 +187,9 @@ int main() {
 
     /*------------------- shapes -------------------------*/
     vector<int> input_g_shape = {3, 5, 5};
-    vector<int> input_l_shape = {3, 5, 5};
+    vector<int> input_l_shape = {2, 2, 2};
     vector<int> output_g_shape = {3, 5, 5};
-    vector<int> output_l_shape = {3, 5, 5};
+    vector<int> output_l_shape = {2, 2, 2};
 
     /*------------------- mdspan setup -------------------*/
     cobra::mdspan<int> in_l{in_l1_mem.data(), input_l_shape};
@@ -197,15 +197,26 @@ int main() {
     cobra::mdspan<int> out_l{out_l1_mem.data(), output_l_shape};
     cobra::mdspan<int> out_g{dst.data(), output_g_shape};
     
-    // slice call
-    cobra::slice<int>(&in_l, &in_g, {0, 0, 0});
+    /**************************************************************/
+    
+    for (int i = 0; i < input_g_shape[0]; i+=input_l_shape[0]) {
+        int w = input_l_shape[0];
+        for (int j = 0; j < input_g_shape[1]; j+=input_l_shape[1] - (para.dilated_kernel[0] - 1)) {
+            int h = input_l_shape[1];
+            for (int k = 0; k < input_g_shape[2]; k+=input_l_shape[2] - (para.dilated_kernel[1] - 1)) {
+               int c = input_l_shape[2];
+               // slice call
+               cobra::slice<int>(&in_l, &in_g, {0, 0, 0}, {i, j, k});
 
-    /*-------------------- cfunc call ---------------------*/
-    maxpool_cfunc(out_l.data, in_l.data, 3, 5, 5, para);
+               /*-------------------- cfunc call ---------------------*/
+               maxpool_cfunc(out_l.data, in_l.data, w, h, c, para);
 
-    // slice call
-    cobra::slice<int>(&out_g, &out_l, {0, 0, 0});
-
+               // slice call
+               cobra::slice<int>(&out_g, &out_l, {i, j, k}, {0, 0, 0});
+            }
+        }
+    }
+    /**************************************************************/
     print(&out_g);
     print(&in_g);
 
