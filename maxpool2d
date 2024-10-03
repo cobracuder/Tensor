@@ -48,6 +48,22 @@ void print(const T& s) {
     }
 } // print
 
+// special case print
+namespace sp{
+template<typename T>
+void print(const T *arr) {
+    if (DEBUG_OPTION) {
+        int size = 2;
+        std::cout << endl;
+        for (auto i = 0; i <size; i++) {
+            std::cout << arr[i] << ", ";
+        }
+        std::cout << endl;
+    }
+} // print
+}
+
+
 /*----- To Print Multi-Dimension array ------*/
 template<typename T>
 void dis(int dim, int idx, T *data, const vector<int>& st, const vector<int>& sh, int rank) {
@@ -110,14 +126,15 @@ void slice(mdspan<T> *des, mdspan<T> *source,
     cpy(0, 0, 0, des_st, src_st, des->shape, source->shape, rank,
         des->data, source->data, src_offset, dst_offset);
 } // slice
-}
+} // namespace cobra
 
 /*--------- Max Pool function ----------*/
 struct op_para {
     int kernel[3];
     bool ceil_mode;
     int stride[2];
-    int dailation[2];
+    int dilation[2];
+    int dilated_kernel[2];
 };
 
 template<typename T>
@@ -132,8 +149,8 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
                 }
 
                 int mx = INT_MIN;
-                for (int l = 0, d_l = 0; l < para.kernel[0]; l++, d_l += (para.dailation[0] + 1)) {
-                    for (int m = 0, d_m = 0; m < para.kernel[1]; m++, d_m += (para.dailation[1] + 1)) {
+                for (int l = 0, d_l = 0; l < para.kernel[0]; l++, d_l += (para.dilation[0])) {
+                    for (int m = 0, d_m = 0; m < para.kernel[1]; m++, d_m += (para.dilation[1])) {
                         if ((k + d_m < h) && (i + d_l < c)) {
                             mx = max(mx, in[(j * (h * c)) + ((k + d_m) * c) + i + d_l]);
                         }
@@ -143,14 +160,16 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
             }
         }
     }
-} // cobra
+} // maxpool_cfunc
 
 /******************************************************************************************/
 
 int main() {
-    vector<int> arr(100, 0);
+    vector<int> in_l1_mem(100, 0);
     vector<int> src(125);
-    vector<int> out(100, INT_MIN);
+    vector<int> out_l1_mem(100, INT_MIN);
+    vector<int> dst(125);
+
     cobra::initialize(src);
 
     /*------------------ INITIALIZE PARA ----------------*/
@@ -160,21 +179,35 @@ int main() {
     para.ceil_mode = 1;
     para.stride[0] = 1;
     para.stride[1] = 1;
-    para.dailation[0] = 0;
-    para.dailation[1] = 0;
+    para.dilation[0] = 1;
+    para.dilation[1] = 1;
+    para.dilated_kernel[0] = para.dilation[0] * (para.kernel[0] - 1) + 1;
+    para.dilated_kernel[1] = para.dilation[1] * (para.kernel[0] - 1) + 1;
+    cobra::sp::print(para.dilated_kernel);
+
+    /*------------------- shapes -------------------------*/
+    vector<int> input_g_shape = {3, 5, 5};
+    vector<int> input_l_shape = {3, 5, 5};
+    vector<int> output_g_shape = {3, 5, 5};
+    vector<int> output_l_shape = {3, 5, 5};
 
     /*------------------- mdspan setup -------------------*/
-    cobra::mdspan<int> ob1{arr.data(), {3, 5, 5}};
-    cobra::mdspan<int> ob2{src.data(), {3, 5, 5}};
-    cobra::mdspan<int> out3{out.data(), {3, 5, 5}};
+    cobra::mdspan<int> in_l{in_l1_mem.data(), input_l_shape};
+    cobra::mdspan<int> in_g{src.data(), input_g_shape};
+    cobra::mdspan<int> out_l{out_l1_mem.data(), output_l_shape};
+    cobra::mdspan<int> out_g{dst.data(), output_g_shape};
     
     // slice call
-    cobra::slice<int>(&ob1, &ob2, {0, 0, 0});
+    cobra::slice<int>(&in_l, &in_g, {0, 0, 0});
 
     /*-------------------- cfunc call ---------------------*/
-    maxpool_cfunc(out.data(), arr.data(), 3, 5, 5, para);
-    print(&out3);
-    print(&ob2);
+    maxpool_cfunc(out_l.data, in_l.data, 3, 5, 5, para);
+
+    // slice call
+    cobra::slice<int>(&out_g, &out_l, {0, 0, 0});
+
+    print(&out_g);
+    print(&in_g);
 
     return 0;
 }
