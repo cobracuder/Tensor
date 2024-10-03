@@ -135,6 +135,7 @@ struct op_para {
     int stride[2];
     int dilation[2];
     int dilated_kernel[2];
+    int padding[4];
 };
 
 template<typename T>
@@ -178,14 +179,17 @@ int main() {
     op_para para;
     para.kernel[0] = 3;
     para.kernel[1] = 3;
-    para.ceil_mode = 0;
+    para.ceil_mode = 1;
     para.stride[0] = 1;
     para.stride[1] = 1;
     para.dilation[0] = 1;
     para.dilation[1] = 1;
     para.dilated_kernel[0] = para.dilation[0] * (para.kernel[0] - 1) + 1;
     para.dilated_kernel[1] = para.dilation[1] * (para.kernel[0] - 1) + 1;
-    // cobra::sp::print(para.dilated_kernel);
+    para.padding[0] = 1;
+    para.padding[1] = 0;
+
+    cobra::sp::print(para.padding);
 
     /*------------------- shapes -------------------------*/
     vector<int> input_g_shape = {3, 5, 5};
@@ -198,21 +202,51 @@ int main() {
     cobra::mdspan<int> in_g{src.data(), input_g_shape};
     cobra::mdspan<int> out_l{out_l1_mem.data(), output_l_shape};
     cobra::mdspan<int> out_g{dst.data(), output_g_shape};
-    
+
     /**************************************************************/
-    
-    for (int i = 0; i < input_g_shape[0]; i += input_l_shape[0]) {
-        int w = input_g_shape[0] - i;
+    int W, H, C;
+    W = input_g_shape[0];
+    H = input_g_shape[1] + 2 * para.padding[0];
+    C = input_g_shape[2] + 2 * para.padding[1];
+
+    for (int i = 0; i < W; i += input_l_shape[0]) {
+        int w = W - i;
             w = w > input_l_shape[0]? input_l_shape[0]: w;
-        for (int j = 0; j < input_g_shape[1]; j += (input_l_shape[1] - (para.dilated_kernel[0] - 1))) {
-            int h = input_g_shape[1] - j;
+        for (int j = 0; j < H; j += (input_l_shape[1] - (para.dilated_kernel[0] - 1))) {
+            int h = H - j;
             h = h > input_l_shape[1]? input_l_shape[1]: h;
-            for (int k = 0; k < input_g_shape[2]; k += (input_l_shape[2] - (para.dilated_kernel[1] - 1))) {
-               int c = input_g_shape[2] - k;
+            int l1off_j, l1off_k;
+            int goff_j, goff_k;
+
+            if (j <= para.padding[0]) {
+              l1off_j = para.padding[0] - j;
+            }
+            goff_j = max(j - para.padding[0], 0);
+
+            for (int k = 0; k < C; k += (input_l_shape[2] - (para.dilated_kernel[1] - 1))) {
+               int c = C - k;
                c = c > input_l_shape[2]? input_l_shape[2]: c;
+
+               if (k <= para.padding[1]) {
+                l1off_k = para.padding[1] - k;
+               }
+                
+                // cobra::print(vector<int>{0, l1off_j, l1off_k});
+                goff_k = max(k - para.padding[1], 0);
+
+                in_l1_mem.resize(100, INT_MIN);
                // slice call
+               
+               if(h + goff_j >= input_g_shape[1]) {
+                    h = input_g_shape[1] - goff_j;
+               }
+
+                if(c + goff_k >= input_g_shape[2]) {
+                    c = input_g_shape[2] - goff_k;
+               }
+
                cobra::mdspan<int> in_l{in_l1_mem.data(), {w, h, c}};
-               cobra::slice<int>(&in_l, &in_g, {0, 0, 0}, {i, j, k});
+               cobra::slice<int>(&in_l, &in_g, {0, l1off_j, l1off_k}, {i, goff_j, goff_k});
 
                /*-------------------- cfunc call ---------------------*/
                maxpool_cfunc(out_l.data, in_l.data, w, h, c, para);
@@ -222,11 +256,8 @@ int main() {
             }
         }
     }
-
     /**************************************************************/
-
     print(&out_g);
     print(&in_g);
-
     return 0;
 }
