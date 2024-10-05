@@ -179,8 +179,8 @@ template<typename T>
 void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
     int count = 0;
     for (int k = 0; k < c; k++) {
-        for (int j = 0; j + para.dilated_kernel[0] <= h; j += para.stride[0]) {
-            for (int i = 0; i + para.dilated_kernel[1] <= w ; i += para.stride[1]) {
+        for (int i = 0; i + para.dilated_kernel[1] <= w ; i += para.stride[1]) {
+             for (int j = 0; j + para.dilated_kernel[0] <= h; j += para.stride[0]) {
                 int mx = INT_MIN;
                 // Apply the kernel with dilation over the input
                 for (int d_j = 0; d_j < para.dilated_kernel[0]; d_j += para.dilation[0]) {
@@ -190,8 +190,7 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
                         }
                     }
                 }
-                out[count] = mx;
-                count++;
+                out[i * (h * c) + (j) * c + k] = mx;
             }
         }
     }
@@ -199,8 +198,8 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
 
 /******************************************************************************************/
 void set_op_para(op_para &para) {
-    para.kernel[0] = 3;
-    para.kernel[1] = 3;
+    para.kernel[0] = 2;
+    para.kernel[1] = 1;
     para.ceil_mode = 0;    // Enable ceil mode for pooling
     para.stride[0] =1;
     para.stride[1] = 1;
@@ -239,8 +238,8 @@ int main() {
     set_op_para(para);
 
     /*------------------- SHAPES -------------------------*/
-    vector<int> input_g_shape = {3, 4, 20};
-    vector<int> input_l_shape = {3, 3, 20};
+    vector<int> input_g_shape = {1, 4, 2};
+    vector<int> input_l_shape = {1, 4, 4};
     vector<int> output_l_shape(3);
     vector<int> output_g_shape(3);
 
@@ -288,7 +287,6 @@ int main() {
 
                 //global -> private slicing
                 cobra::mdspan<int> input{in_l1_mem.data(), {w, h, c}};
-                // print(&input);
                 cobra::slice(&input, &in_g, {l1off_k, l1off_j, 0}, {goff_k, goff_j, i});
 
                 /*-------------------- cfunc call ---------------------*/
