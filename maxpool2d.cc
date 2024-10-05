@@ -14,13 +14,13 @@ namespace cobra {
 template<typename T>
 struct mdspan {
     T *data;
-    vector<int> shape;
+    std::vector<int> shape;
 };
 
 /*------- To initialize data ------*/
 /* Initialize the vector with incrementing values starting from 1 */
 template<typename T>
-void initialize(vector<T>& data) {
+void initialize(std::vector<T>& data) {
     int size = data.size();
     for (int i = 0; i < size; i++) {
         data[i] = i + 1;
@@ -34,7 +34,7 @@ void initialize(vector<T>& data) {
  * along a specific dimension.
  */
 template<typename T>
-auto cal_stride(const vector<T>& shape) {
+auto cal_stride(const std::vector<T>& shape) {
     vector<T> stride(shape.size(), 1);
     for (int64_t i = shape.size() - 2; i >= 0; --i) {
         stride[i] = stride[i + 1] * shape[i + 1];
@@ -45,13 +45,13 @@ auto cal_stride(const vector<T>& shape) {
 /*-------- Debug print functions ---------*/
 /* Utility function to print 1D vectors */
 template<typename T>
-void print(const vector<T>& arr, bool flag = 0) {
+void print(const std::vector<T>& arr, bool flag = 0) {
     if (DEBUG_OPTION || flag) {
-        std::cout << endl;
+        std::cout << std::endl;
         for (auto i : arr) {
             std::cout << i << ", ";
         }
-        std::cout << endl;
+        std::cout << std::endl;
     }
 } // print
 
@@ -59,7 +59,7 @@ void print(const vector<T>& arr, bool flag = 0) {
 template<typename T>
 void print(const T& s) {
     if (DEBUG_OPTION) {
-        std::cout << endl << s << endl;
+        std::cout << std::endl << s << std::endl;
     }
 } // print
 
@@ -69,11 +69,11 @@ template<typename T>
 void print(const T *arr) {
     if (DEBUG_OPTION) {
         int size = 2;  // Limiting size for demo purposes
-        std::cout << endl;
+        std::cout << std::endl;
         for (auto i = 0; i <size; i++) {
             std::cout << arr[i] << ", ";
         }
-        std::cout << endl;
+        std::cout << std::endl;
     }
 } // print
 }
@@ -81,7 +81,8 @@ void print(const T *arr) {
 /*----- To Print Multi-Dimensional array ------*/
 /* Recursively display multi-dimensional data using strides for indexing */
 template<typename T>
-void dis(int dim, int idx, T *data, const vector<int>& st, const vector<int>& sh, int rank) {
+void dis(int dim, int idx, T *data, const std::vector<int>& st,
+         const std::vector<int>& sh, int rank) {
     if (dim == rank) {
         std::cout << data[idx] << ", ";
         return;
@@ -105,7 +106,7 @@ void print(mdspan<T> *ob, bool flag = 0, string s = "") {
         }
         std::cout << "\nDATA: \n";
         dis(0, 0, ob->data, cal_stride(ob->shape), ob->shape, ob->shape.size());
-        std::cout << endl;
+        std::cout << std::endl;
     }
 } // print
 
@@ -175,8 +176,6 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
     for (int j = 0; j < w; j++) {
         for (int k = 0; k + para.dilated_kernel[0] <= h; k += para.stride[0]) {
             for (int i = 0; i + para.dilated_kernel[1] <= c ; i += para.stride[1]) {
-                // Check if kernel window is within bounds or if ceil_mode is enabled
- 
                 int mx = INT_MIN;
                 // Apply the kernel with dilation over the input
                 for (int d_l = 0; d_l < para.dilated_kernel[0]; d_l += para.dilation[0]) {
@@ -194,39 +193,57 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
 } // maxpool_cfunc
 
 /******************************************************************************************/
+void set_op_para(op_para &para) {
+    para.kernel[0] = 4;
+    para.kernel[1] = 4;
+    para.ceil_mode = 0;    // Enable ceil mode for pooling
+    para.stride[0] = 2;
+    para.stride[1] = 3;
+    para.dilation[0] = 1;
+    para.dilation[1] = 1;
+    para.dilated_kernel[0] = para.dilation[0] * (para.kernel[0] - 1) + 1;
+    para.dilated_kernel[1] = para.dilation[1] * (para.kernel[1] - 1) + 1;
+    para.padding[0] = 2;
+    para.padding[1] = 2;
+}
+
+void get_out_shape(vector<int>&out_shape, int W, int H, int C, op_para para) {
+    out_shape[0] = W;
+    out_shape[1] = CAL_OUT(H, para.dilated_kernel[0], para.stride[0]) + 1;
+    out_shape[2] = CAL_OUT(C, para.dilated_kernel[1], para.stride[1]) + 1;
+}
+
+void set_in_offset_after_padding(int &l1_offset, int &global_offset,
+                                 int pad_size, int cur_in_idx) {
+    l1_offset = cur_in_idx < pad_size? pad_size - cur_in_idx: 0;
+    global_offset = std::max(cur_in_idx - pad_size, 0);
+}
 
 int main() {
     using namespace cobra;
     // Initializing input and output buffers
-    vector<int> in_l1_mem(100, 0);
-    vector<int> src(125);
-    vector<int> out_l1_mem(100, INT_MIN); // INT_MIN is used to track uninitialized areas
-    vector<int> dst(125);
+    vector<int> in_l1_mem(100000, 0);
+    vector<int> src(1250000);
+    vector<int> out_l1_mem(1000000, INT_MIN); // INT_MIN is used to track uninitialized areas
+    vector<int> dst(1250000);
 
     initialize(src);  // Initialize input with sequential values
 
     /*------------------ INITIALIZE PARAMETERS ----------------*/
     op_para para;
-    para.kernel[0] = 2;
-    para.kernel[1] = 2;
-    para.ceil_mode = 0;    // Enable ceil mode for pooling
-    para.stride[0] = 1;
-    para.stride[1] = 1;
-    para.dilation[0] = 1;
-    para.dilation[1] = 1;
-    para.dilated_kernel[0] = para.dilation[0] * (para.kernel[0] - 1) + 1;
-    para.dilated_kernel[1] = para.dilation[1] * (para.kernel[1] - 1) + 1;
-    para.padding[0] = 0;
-    para.padding[1] = 0;
+    set_op_para(para);
 
     /*------------------- SHAPES -------------------------*/
-    vector<int> input_g_shape = {2, 10, 6};
-    vector<int> input_l_shape = {1, 5, 5};
+    vector<int> input_g_shape = {1, 10, 14};
+    vector<int> input_l_shape = {1, 150, 200};
+    vector<int> output_l_shape(3);
+    vector<int> output_g_shape(3);
+
     int W, H, C;
     W = input_g_shape[0];
     H = input_g_shape[1] + 2 * para.padding[0];
     C = input_g_shape[2] + 2 * para.padding[1];
-    vector<int> output_g_shape = {2, CAL_OUT(H, para.dilated_kernel[0], para.stride[0]) + 1, CAL_OUT(C, para.dilated_kernel[1], para.stride[1]) + 1};
+    get_out_shape(output_g_shape, W, H, C, para);
 
     /*------------------- MDSPAN SETUP -------------------*/
     // cobra::mdspan<int> in_l{in_l1_mem.data(), input_l_shape};
@@ -238,6 +255,7 @@ int main() {
     w = input_l_shape[0];
     h = input_l_shape[1];
     c = input_l_shape[2];
+
     /*----- Initialize l1 shape and sub input offsets -----*/
     int l1off_j, l1off_k;
     int goff_j, goff_k;
@@ -249,24 +267,28 @@ int main() {
     c = step_k + para.dilated_kernel[1];
     step_j += para.stride[0];
     step_k += para.stride[1];
-    vector<int> output_l_shape = {1, jump_j, jump_k};
+
+    /*---------- return shape corresponding to output ------------*/
+    get_out_shape(output_l_shape, w, h, c, para);
     mdspan<int> out_l{out_l1_mem.data(), output_l_shape};
 
     for (int i = 0; i < W; i += w) {
         for (int j = 0, j_out = 0; j < H; j += step_j, j_out += jump_j) {
-            l1off_j = j < para.padding[0]? para.padding[0] - j: 0;
-            goff_j = max(j - para.padding[0], 0);
-            for (int k = 0, k_out = 0; k < C; k += step_k, k_out += jump_k){
-                l1off_k = k < para.padding[1]? para.padding[1] - k: 0;
-                goff_k = max(k - para.padding[1], 0);
+            /*---------------- SETTING J(private and global) OFFSET TO HANDLE PADDING ----------*/
+            set_in_offset_after_padding(l1off_j, goff_j, para.padding[0], j);
 
+            for (int k = 0, k_out = 0; k < C; k += step_k, k_out += jump_k){
+                /*------------ SETTING k(private and global) OFFSET TO HANDLE PADDING ----------*/
+                set_in_offset_after_padding(l1off_k, goff_k, para.padding[1], k);
+
+                //global -> private slicing
                 cobra::mdspan<int> input{in_l1_mem.data(), {w, h, c}};
                 cobra::slice(&input, &in_g, {0, l1off_j, l1off_k}, {i, goff_j, goff_k});
 
                 /*-------------------- cfunc call ---------------------*/
                 maxpool_cfunc(out_l.data, input.data, w, h, c, para);
 
-                // slice call
+                // private -> global slicing
                 cobra::slice<int>(&out_g, &out_l, {i, j_out, k_out},
                                                    {0, 0, 0});
             }
