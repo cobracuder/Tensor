@@ -169,6 +169,7 @@ struct op_para {
     int dilation[2];       // Dilation factor for pooling
     int dilated_kernel[2]; // Dilated kernel size
     int padding[4];        // Padding values
+    int out_shape[4];
 };
 
 /* 
@@ -177,10 +178,10 @@ struct op_para {
  */
 template<typename T>
 void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
-    int count = 0;
+
     for (int k = 0; k < c; k++) {
-        for (int i = 0; i + para.dilated_kernel[1] <= w ; i += para.stride[1]) {
-             for (int j = 0; j + para.dilated_kernel[0] <= h; j += para.stride[0]) {
+        for (int i = 0, i_out = 0; i + para.dilated_kernel[1] <= w ; i += para.stride[1], i_out++) {
+             for (int j = 0, j_out = 0; j + para.dilated_kernel[0] <= h; j += para.stride[0], j_out++) {
                 int mx = INT_MIN;
                 // Apply the kernel with dilation over the input
                 for (int d_j = 0; d_j < para.dilated_kernel[0]; d_j += para.dilation[0]) {
@@ -190,7 +191,7 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
                         }
                     }
                 }
-                out[i * (h * c) + (j) * c + k] = mx;
+                out[i_out * (para.out_shape[1] * para.out_shape[2]) + (j_out) * para.out_shape[2] + k] = mx;
             }
         }
     }
@@ -199,7 +200,7 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
 /******************************************************************************************/
 void set_op_para(op_para &para) {
     para.kernel[0] = 2;
-    para.kernel[1] = 1;
+    para.kernel[1] = 2;
     para.ceil_mode = 0;    // Enable ceil mode for pooling
     para.stride[0] =1;
     para.stride[1] = 1;
@@ -238,12 +239,12 @@ int main() {
     set_op_para(para);
 
     /*------------------- SHAPES -------------------------*/
-    vector<int> input_g_shape = {1, 4, 2};
-    vector<int> input_l_shape = {1, 4, 4};
+    vector<int> input_g_shape = {5, 5, 4};
+    vector<int> input_l_shape = {4, 4, 4};
     vector<int> output_l_shape(3);
     vector<int> output_g_shape(3);
 
-    int W, H, C;
+    int W, H, C; // NWHC
     W = input_g_shape[0] + 2 * para.padding[1];
     H = input_g_shape[1] + 2 * para.padding[0];
     C = input_g_shape[2];
@@ -275,6 +276,11 @@ int main() {
     /*---------- return shape corresponding to output ------------*/
     get_out_shape(output_l_shape, w, h, c, para);
     mdspan<int> out_l{out_l1_mem.data(), output_l_shape};
+    
+    for (int i = 0; i < 3; i++) {
+        para.out_shape[i] = output_l_shape[i];
+    }
+
 
     for (int i = 0; i < C; i += c) {
         for (int j = 0, j_out = 0; j < H; j += step_j, j_out += jump_j) {
@@ -289,8 +295,11 @@ int main() {
                 cobra::mdspan<int> input{in_l1_mem.data(), {w, h, c}};
                 cobra::slice(&input, &in_g, {l1off_k, l1off_j, 0}, {goff_k, goff_j, i});
 
+
+                // print(&input, 1); 
                 /*-------------------- cfunc call ---------------------*/
                 maxpool_cfunc(out_l.data, input.data, w, h, c, para);
+                // print(&out_l, 1);
 
                 // private -> global slicing
                 cobra::slice<int>(&out_g, &out_l, {k_out, j_out, i},
