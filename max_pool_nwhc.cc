@@ -199,11 +199,11 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, op_para para) {
 
 /******************************************************************************************/
 void set_op_para(op_para &para) {
-    para.kernel[0] = 2;
-    para.kernel[1] = 2;
+    para.kernel[0] = 3;
+    para.kernel[1] = 3;
     para.ceil_mode = 0;    // Enable ceil mode for pooling
-    para.stride[0] =1;
-    para.stride[1] = 1;
+    para.stride[0] =2;
+    para.stride[1] = 2;
     para.dilation[0] = 1;
     para.dilation[1] = 1;
     para.dilated_kernel[0] = para.dilation[0] * (para.kernel[0] - 1) + 1;
@@ -308,7 +308,7 @@ int main() {
         }
     }
     /******************************************************/
-    print(&out_g, 1);
+    print(&out_g, 1); // follow NHWC
     print(&in_g, 1);
     return 0;
 }
