@@ -59,12 +59,7 @@ void bilinear2D(vector<vector<T>> &out, vector<vector<T>> &in, bool align_corner
                 float weight_x = idx_x - low_x;
                 float val_1 = (in[low_y][low_x] * (1.0f - weight_x) + in[low_y][high_x] * (weight_x));
                 float val_2 = (in[high_y][low_x] * (1.0f - weight_x) + in[high_y][high_x] * (weight_x));
-
-                if (j == 0) {
-                    cout << in[idx_y][j] <<" ";
-                } else {
-                    cout << (val_1 * (1.0f - weight_y) + val_2 * weight_y) << " ";
-                }
+                cout << (val_1 * (1.0f - weight_y) + val_2 * weight_y) << " ";
             }
             cout<<"\n";
         }
