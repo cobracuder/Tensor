@@ -172,31 +172,67 @@ template<typename T>
 void cfunc(T *out, T *in, int n, int c, int w,
            int out_idy, int in_idy, int out_idx,
            int in_idx, int c_in, int w_in, op_para para) {
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < c; j++) {
-                float idx_y = (j + out_idy) * para.scale_factor_row;
-                int low_y = floor(idx_y);
-                float weight_y = idx_y - low_y;
-                low_y -= in_idy;
-                int high_y = ceil(idx_y) - in_idy;
-                for (int k = 0; k < w; k++) {
-                    float idx_x = (k + out_idx) * para.scale_factor_col;
-                    int low_x = floor(idx_x);
-                    float weight_x = idx_x - low_x;
-                    low_x -= in_idx;
-                    int high_x = ceil(idx_x) - in_idx;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < c; j++) {
+            float idx_y = (j + out_idy) * para.scale_factor_row;
+            int low_y = floor(idx_y);
+            float weight_y = idx_y - low_y;
+            low_y -= in_idy;
+            int high_y = min(ceil(idx_y) - in_idy, c_in * 1.0f);
+            for (int k = 0; k < w; k++) {
+                float idx_x = (k + out_idx) * para.scale_factor_col;
+                int low_x = floor(idx_x);
+                float weight_x = idx_x - low_x;
+                low_x -= in_idx;
+                int high_x = min(ceil(idx_x) - in_idx, w_in * 1.0f);
 
-                    T r_up = in[i * (c_in * w_in) + low_y * w_in + low_x];
-                    T l_up = in[i * (c_in * w_in) + low_y * w_in + high_x];
-                    T r_dn = in[i * (c_in * w_in) + high_y * w_in + low_x];
-                    T l_dn = in[i * (c_in * w_in) + high_y * w_in + high_x];
+                T r_up = in[i * (c_in * w_in) + low_y * w_in + low_x];
+                T l_up = in[i * (c_in * w_in) + low_y * w_in + high_x];
+                T r_dn = in[i * (c_in * w_in) + high_y * w_in + low_x];
+                T l_dn = in[i * (c_in * w_in) + high_y * w_in + high_x];
 
-                    float val_1 = (r_up * (1.0f - weight_x) +  l_up * (weight_x));
-                    float val_2 = (r_dn * (1.0f - weight_x) + l_dn * (weight_x));
-                    out[i * (c * w) + j * (w) + k] = (val_1 * (1.0f - weight_y) + val_2 * weight_y);
-                }
+                float val_1 = (r_up * (1.0f - weight_x) +  l_up * (weight_x));
+                float val_2 = (r_dn * (1.0f - weight_x) + l_dn * (weight_x));
+                out[i * (c * w) + j * (w) + k] = (val_1 * (1.0f - weight_y) + val_2 * weight_y);
             }
         }
+    }
+}
+
+template<typename T>
+void cfunc_align_false(T *out, T *in, int n, int c, int w,
+           int out_idy, int in_idy, int out_idx,
+           int in_idx, int c_in, int w_in, op_para para) {
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < c; j++) {
+            float idx_y = (j + out_idy + 0.5f) * para.scale_factor_row - 0.5f;
+            int low_y = max(floor(idx_y), 0.0f);
+            // cout<<"\n-->"<<idx_y<<" "<<low_y<<endl;
+            float weight_y = idx_y - low_y;
+            // cout<<weight_y;
+            low_y -= in_idy;
+            int high_y = min(ceil(idx_y) - in_idy, (c_in - 1) * 1.0f);
+            for (int k = 0; k < w; k++) {
+                float idx_x = (k + out_idx + 0.5f) * para.scale_factor_col - 0.5f;
+                int low_x = max(floor(idx_x), in_idx * 1.0f);
+                float weight_x = idx_x - low_x;
+                low_x -= in_idx;
+                int high_x = min(ceil(idx_x) - in_idx, (w_in - 1) * 1.0f);
+
+                // cout<<"\nweight "<<low_y<<" "<<high_y<<" "<<low_x<<" "<<high_x<<endl;
+
+                T r_up = in[i * (c_in * w_in) + low_y * w_in + low_x];
+                T l_up = in[i * (c_in * w_in) + low_y * w_in + high_x];
+                T r_dn = in[i * (c_in * w_in) + high_y * w_in + low_x];
+                T l_dn = in[i * (c_in * w_in) + high_y * w_in + high_x];
+                // cout<<"\n"<<r_up<<" "<<l_up<<" "<<r_dn<<" "<<l_dn<<endl;
+
+                float val_1 = (r_up * (1.0f - weight_x) +  l_up * (weight_x));
+                float val_2 = (r_dn * (1.0f - weight_x) + l_dn * (weight_x));
+                out[i * (c * w) + j * (w) + k] = (val_1 * (1.0f - weight_y) + val_2 * weight_y);
+            }
+        }
+    }
 }
 
 int main() {
@@ -211,12 +247,12 @@ int main() {
 
     op_para para;
 
-    para.align_corner = 1;
+    para.align_corner = 0;
     /*------------------- SHAPES -------------------------*/
-    vector<int> input_g_shape = {2, 2, 4};
-    vector<int> input_l_shape = {2, 2, 4};
-    vector<int> output_g_shape = {2, 2, 8};
-    vector<int> output_l_shape = {2, 2, 4};
+    vector<int> input_g_shape = {1, 2, 4};
+    vector<int> input_l_shape = {1, 2, 5};
+    vector<int> output_g_shape = {1, 2, 10};
+    vector<int> output_l_shape = {1, 2, 10};
 
     /*-------------------- MDSPAN -----------------------*/
     mdspan<float> src_g{src.data(), input_g_shape};
@@ -228,24 +264,29 @@ int main() {
     int *out = output_l_shape.data();
 
     if (para.align_corner) {
-        para.scale_factor_row = (in_ptr[1] * 1.0f - 1) / (output_g_shape[1] - 1); // ek gap ko 2 gap pe krna hai
-        para.scale_factor_col = (in_ptr[2] * 1.0f - 1) / (output_g_shape[2] - 1); // ek gap ko 2 gap pe krna hai
+        para.scale_factor_row = abs((in_ptr[1] * 1.0f - 1) / (max(output_g_shape[1] - 1, 1))); // ek gap ko 2 gap pe krna hai
+        para.scale_factor_col = abs((in_ptr[2] * 1.0f - 1) / (max(output_g_shape[2] - 1, 1))); // ek gap ko 2 gap pe krna hai
+        cout<<para.scale_factor_row<<" "<<para.scale_factor_col<<endl;
         for (int i = 0; i < ptr[0]; i+= out[0]) {
             int rem_n = ptr[0] - i >= out[0] ? out[0]: ptr[0] - i;
-            for (int j = 0; j < ptr[1]; j+=out[1]) {
+            for (int j = 0; j < ptr[1]; j += out[1]) {
                 int rem_c = ptr[1] - j >= out[1] ? out[1]: ptr[1] - j;
                 float low_idx_y = j * para.scale_factor_row;
                 float high_idx_y = (j + rem_c - 1) * para.scale_factor_row;
-                int low_y = floor(low_idx_y);
+                int low_y = max(0.0f, floor(low_idx_y));
                 int high_y = ceil(high_idx_y);
+                // cout<<low_y<<high_y<<endl;
+
                 high_y = min(high_y, in_ptr[1] - 1);
                 for (int k = 0; k < ptr[2]; k += out[2]) {
                     int rem_w = ptr[2] - k >= out[2] ? out[2]: ptr[2] - k;
                     float low_idx_x = k * para.scale_factor_col;
                     float high_idx_x = (k + rem_w - 1) * para.scale_factor_col;
-                    int low_x = floor(low_idx_x);
+                    int low_x = max(0.0f, floor(low_idx_x));
                     int high_x = ceil(high_idx_x);
-                    cout<<low_x<<high_x;
+                    
+                    // cout<<low_y<<high_y;
+                    
                     high_x = min(high_x, in_ptr[2] - 1);
                     cobra::mdspan<float>in_l(in_l1_mem.data(), {rem_n, (high_y - low_y + 1), (high_x - low_x + 1)});
                     cobra::slice(&in_l, &src_g, {0, 0, 0}, {i, low_y, low_x});
@@ -253,7 +294,6 @@ int main() {
 
                     cfunc(out_l1_mem.data(), in_l.data, rem_n, rem_c, rem_w, j, low_y, k, low_x,
                           (high_y - low_y + 1), (high_x - low_x + 1), para);
-                    // std::cout<<"\n-->"<<(high_y - low_y + 1)<<" "<<(high_x - low_x + 1)<<endl;
                     
                     cobra::mdspan<float>out_l(out_l1_mem.data(), {rem_n, rem_c, rem_w});
                     cobra::slice(&dst_g, &out_l, {i, j, k}, {0, 0, 0});
@@ -261,8 +301,42 @@ int main() {
             }
         }
     } else {
-        // para.scale_factor_row = (row_in * 1.0f) / (row_out);
-        // para.scale_factor_col = (col_in * 1.0f) / (col_out);
+        para.scale_factor_row = (in_ptr[1] * 1.0f) / (output_g_shape[1]); // ek gap ko 2 gap pe krna hai
+        para.scale_factor_col = (in_ptr[2] * 1.0f) / (output_g_shape[2]); // ek gap ko 2 gap pe krna hai
+        // cout<<para.scale_factor_row<<" "<<para.scale_factor_col<<endl;
+        for (int i = 0; i < ptr[0]; i+= out[0]) {
+            int rem_n = ptr[0] - i >= out[0] ? out[0]: ptr[0] - i;
+            for (int j = 0; j < ptr[1]; j += out[1]) {
+                int rem_c = ptr[1] - j >= out[1] ? out[1]: ptr[1] - j;
+                float low_idx_y = (j + 0.5f) * para.scale_factor_row - 0.5f;
+                float high_idx_y = (j + rem_c - 1 + 0.5f) * para.scale_factor_row - 0.5f;
+                int low_y = max(0.0f, floor(low_idx_y));
+                int high_y = ceil(high_idx_y);
+                // cout<<low_y<<high_y<<endl;
+
+                high_y = min(high_y, in_ptr[1] - 1);
+                for (int k = 0; k < ptr[2]; k += out[2]) {
+                    int rem_w = ptr[2] - k >= out[2] ? out[2]: ptr[2] - k;
+                    float low_idx_x = (k + 0.5f) * para.scale_factor_col - 0.5f;
+                    float high_idx_x = (k + rem_w - 1 + 0.5f) * para.scale_factor_col - 0.5f;
+                    int low_x = max(0.0f, floor(low_idx_x));
+                    int high_x = ceil(high_idx_x);
+                    
+                    // cout<<low_y<<high_y;
+                    
+                    high_x = min(high_x, in_ptr[2] - 1);
+                    cobra::mdspan<float>in_l(in_l1_mem.data(), {rem_n, (high_y - low_y + 1), (high_x - low_x + 1)});
+                    cobra::slice(&in_l, &src_g, {0, 0, 0}, {i, low_y, low_x});
+                    // print(&in_l);
+
+                    cfunc_align_false(out_l1_mem.data(), in_l.data, rem_n, rem_c, rem_w, j, low_y, k, low_x,
+                          (high_y - low_y + 1), (high_x - low_x + 1), para);
+                    
+                    cobra::mdspan<float>out_l(out_l1_mem.data(), {rem_n, rem_c, rem_w});
+                    cobra::slice(&dst_g, &out_l, {i, j, k}, {0, 0, 0});
+                }
+            }
+        }
     }
 
     // print(&src_g);
