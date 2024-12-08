@@ -45,7 +45,7 @@ auto cal_stride(const std::vector<T>& shape) {
 /*-------- Debug print functions ---------*/
 /* Utility function to print 1D vectors */
 template<typename T>
-void print(const std::vector<T>& arr, bool flag = 0) {
+void print(const std::vector<T> arr, bool flag = 0) {
     if (DEBUG_OPTION || flag) {
         std::cout << std::endl;
         for (auto i : arr) {
@@ -174,7 +174,7 @@ void cpy2(int dim, int dim2, int dst, int src, const vector<T1>& dst_st, const v
 } // cpy
 
 template<typename T>
-void strided(int dim, int64_t index, vector<int64_t>strides, vector<int64_t>shape, vector<T>&dst, T *src) {
+void strided(int dim, int index, vector<int>strides, vector<int>shape, vector<T>&dst, T *src) {
     if(dim == shape.size()){
         dst.push_back(src[index]);
         return;
@@ -220,10 +220,10 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, int dilated_kernel,
 /******************************************************************************************/
 void set_op_para(op_para &para) {
     para.kernel[0] = 3;
-    para.kernel[1] = 3;
+    para.kernel[1] = 1;
     para.ceil_mode = 0;    // Enable ceil mode for pooling
     para.stride[0] = 2;
-    para.stride[1] = 2;
+    para.stride[1] = 1;
     para.dilation[0] = 1;
     para.dilation[1] = 1;
     para.dilated_kernel[0] = para.dilation[0] * (para.kernel[0] - 1) + 1;
@@ -259,38 +259,87 @@ int main() {
     set_op_para(para);
 
     /*------------------- SHAPES -------------------------*/
-    vector<int> input_l_shape = {1, 2, 6};
-    vector<int> output_l_shape = {1, 4, 6};
-    vector<int> output_g_shape = {1, 9, 6};
+    vector<int> output_g_shape = {1, 5, 1};
 
     int sliding_window = ceil((output_g_shape[1] - para.dilated_kernel[0] + 1.0f) / para.stride[0]);
-    vector<int> input_g_shape = {1, sliding_window * para.kernel[0], output_g_shape[2]};
-    cout<< sliding_window * para.kernel[0];
+    int sliding_window2 = ceil((output_g_shape[2] - para.dilated_kernel[1] + 1.0f) / para.stride[1]);
+    vector<int> input_g_shape = {1, sliding_window * para.kernel[0], sliding_window2 * para.kernel[1]};
 
     int W, H, C;
-    W = output_g_shape[0];
-    H = output_g_shape[1];
-    C = output_g_shape[2];
+    W = input_g_shape[0];
+    H = input_g_shape[1];
+    C = input_g_shape[2];
+    int h = para.kernel[0] * 2, c = 128;
 
-    // /*------------------- MDSPAN SETUP -------------------*/
-    // cobra::mdspan<int> in_l{in_l1_mem.data(), input_l_shape};
     cobra::mdspan<int> in_g{src.data(), input_g_shape};
     cobra::mdspan<int> out_g{dst.data(), output_g_shape};
+    int pre = 0;
 
-    maxpool_cfunc(out_g.data, in_g.data, W, H, C, para.dilated_kernel[0],
+    print(vector<int>{H, C}, 1);
+    for (int i = 0; i < H; i += h) {
+        int rem = H - i > h? h: H - i;
+        int out_h = (rem / para.kernel[0] - 1) * para.stride[0] + para.dilated_kernel[0];
+        std::cout << "\nout" << out_h << endl;
+        cobra::mdspan<int> in_l{in_l1_mem.data(), {1, rem, c}};
+        cobra::mdspan<int> out_l{out_l1_mem.data(), {1, out_h, c}};
+        int offset_h_out = (i / para.kernel[0]) * para.stride[0];
+        for (int j = 0; j < C; j += c) {
+            cout << offset_h_out << "\n";
+            cobra::slice<int>(&in_l, &in_g, {0, 0, 0}, {0, i, j});
+            // print(&in_l, 1);
+            cobra::slice<int>(&out_l, &out_g, {0, 0, 0}, {0, offset_h_out, j});
+            maxpool_cfunc(out_l.data, in_l.data, 1, out_h, c,
+                  para.dilated_kernel[0],
                   para.stride[0], para.dilation[0], para.kernel[0], para);
-    
-    vector<int> trans_mem;
-    vector<int> s = {1, 6, 9};
-    
-    strided<int>(0, 0, {54, 1, 6}, {1, 6, 9},trans_mem, out_g.data);
-    cobra::mdspan<int> trans{trans_mem.data(), s};
+            // print(&out_l, 1);  
+            cobra::slice<int>(&out_g, &out_l, {0, offset_h_out, j});
+        }
+    }
+    print(&in_g, 1);
+    print(&out_g, 1);
 
-    int out = (6 / para.kernel[1]) * para.stride[1] - 1+ para.dilated_kernel[1];
-    cout <<"\n" << out << "\n";
-    maxpool_cfunc(out_g.data, trans.data, 1, 6, 9, para.dilated_kernel[1],
-                  para.stride[1], para.dilation[1], para.kernel[1], para);
+    // int W, H, C;
+    // W = output_g_shape[0];
+    // H = output_g_shape[1];
+    // C = output_g_shape[2];
 
+    // // /*------------------- MDSPAN SETUP -------------------*/
+    // // cobra::mdspan<int> in_l{in_l1_mem.data(), input_l_shape};
+    // cobra::mdspan<int> in_g{src.data(), input_g_shape};
+    // print(&in_g, 1);
+
+    // cobra::mdspan<int> out_g{dst.data(), output_g_shape};
+    // cobra::mdspan<int> temp{dst.data(), {1, output_g_shape[1], input_g_shape[2]}};
+
+    // maxpool_cfunc(temp.data, in_g.data, 1, output_g_shape[1], input_g_shape[2],
+    //               para.dilated_kernel[0],
+    //               para.stride[0], para.dilation[0], para.kernel[0], para);
+    // print(&temp, 1);
+    
+    // vector<int> trans_mem;
+    // vector<int> s = {1, input_g_shape[2], output_g_shape[1]};
+
+    // H = output_g_shape[1];
+    // C = input_g_shape[2];
+    
+    // strided<int>(0, 0, {H * C, 1, C}, {1, C, H}, trans_mem, temp.data);
+
+    // cobra::mdspan<int> trans{trans_mem.data(), s};
+    // print(&trans, 1);
+
+    // int out = (s[1] / para.kernel[1] - 1) * para.stride[1] + para.dilated_kernel[1];
+    // cout <<"\nout:" << out << "\n";
+
+    // vector<int> final_out(100000, 0);
+    // maxpool_cfunc(final_out.data(), trans.data, 1, out, s[2], para.dilated_kernel[1],
+    //               para.stride[1], para.dilation[1], para.kernel[1], para);
+    
+    // vector<int> new_mem;
+    // H = output_g_shape[1];
+    // C = output_g_shape[2];
+    // strided<int>(0, 0, {H * C, 1, H}, output_g_shape, new_mem, final_out.data());
+    // cobra::mdspan<int> final{new_mem.data(), output_g_shape};
+    // print(&final, 1);
 
     // print(&trans, 1);
     // (const vector<T1>& dst_st, const vector<T1>& src_st,
@@ -343,7 +392,5 @@ int main() {
     //     }
     // }
     /******************************************************/
-    print(&out_g, 1);
-    print(&in_g, 1);
     return 0;
 }
