@@ -220,9 +220,9 @@ void maxpool_cfunc(T *out, T *in, int w, int h, int c, int dilated_kernel,
 /******************************************************************************************/
 void set_op_para(op_para &para) {
     para.kernel[0] = 3;
-    para.kernel[1] = 1;
+    para.kernel[1] = 3;
     para.ceil_mode = 0;    // Enable ceil mode for pooling
-    para.stride[0] = 2;
+    para.stride[0] = 1;
     para.stride[1] = 1;
     para.dilation[0] = 1;
     para.dilation[1] = 1;
@@ -247,10 +247,11 @@ void set_in_offset_after_padding(int &l1_offset, int &global_offset,
 int main() {
     using namespace cobra;
     // Initializing input and output buffers
-    vector<int> in_l1_mem(100000, 0);
-    vector<int> src(1250000);
-    vector<int> out_l1_mem(1000000, 0); // INT_MIN is used to track uninitialized areas
-    vector<int> dst(1250000);
+    vector<int> in_l1_mem(1000, 0);
+    vector<int> src(125000);
+    vector<int> out_l1_mem(1000, 0); // INT_MIN is used to track uninitialized areas
+    vector<int> dst(12500);
+    vector<int> intermediate(12500, 0);
 
     initialize(src);  // Initialize input with sequential values
 
@@ -259,11 +260,12 @@ int main() {
     set_op_para(para);
 
     /*------------------- SHAPES -------------------------*/
-    vector<int> output_g_shape = {1, 5, 1};
+    vector<int> output_g_shape = {1, 4, 4};
 
     int sliding_window = ceil((output_g_shape[1] - para.dilated_kernel[0] + 1.0f) / para.stride[0]);
     int sliding_window2 = ceil((output_g_shape[2] - para.dilated_kernel[1] + 1.0f) / para.stride[1]);
     vector<int> input_g_shape = {1, sliding_window * para.kernel[0], sliding_window2 * para.kernel[1]};
+    vector<int> inter_shape = {1, output_g_shape[1], input_g_shape[2]};
 
     int W, H, C;
     W = input_g_shape[0];
@@ -273,124 +275,65 @@ int main() {
 
     cobra::mdspan<int> in_g{src.data(), input_g_shape};
     cobra::mdspan<int> out_g{dst.data(), output_g_shape};
+    cobra::mdspan<int> inter{intermediate.data(), inter_shape};
+
     int pre = 0;
 
     print(vector<int>{H, C}, 1);
     for (int i = 0; i < H; i += h) {
         int rem = H - i > h? h: H - i;
         int out_h = (rem / para.kernel[0] - 1) * para.stride[0] + para.dilated_kernel[0];
-        std::cout << "\nout" << out_h << endl;
         cobra::mdspan<int> in_l{in_l1_mem.data(), {1, rem, c}};
         cobra::mdspan<int> out_l{out_l1_mem.data(), {1, out_h, c}};
         int offset_h_out = (i / para.kernel[0]) * para.stride[0];
         for (int j = 0; j < C; j += c) {
-            cout << offset_h_out << "\n";
             cobra::slice<int>(&in_l, &in_g, {0, 0, 0}, {0, i, j});
-            // print(&in_l, 1);
-            cobra::slice<int>(&out_l, &out_g, {0, 0, 0}, {0, offset_h_out, j});
+            cobra::slice<int>(&out_l, &inter, {0, 0, 0}, {0, offset_h_out, j});
             maxpool_cfunc(out_l.data, in_l.data, 1, out_h, c,
                   para.dilated_kernel[0],
                   para.stride[0], para.dilation[0], para.kernel[0], para);
-            // print(&out_l, 1);  
-            cobra::slice<int>(&out_g, &out_l, {0, offset_h_out, j});
+            cobra::slice<int>(&inter, &out_l, {0, offset_h_out, j});
         }
     }
+
+    h = 128, c = para.kernel[1] * 2;
+    H = output_g_shape[1];
+
+    // sync thread
+
+    for (int i = 0; i < C; i += c) {
+        int rem = C - i > c? c: C - i;
+        int out_c = (rem / para.kernel[1] - 1) * para.stride[1] + para.dilated_kernel[1];
+        cobra::mdspan<int> in_l{in_l1_mem.data(), {1, h, rem}};
+        cobra::mdspan<int> out_l{out_l1_mem.data(), {1, h, out_c}};
+        int offset_c_out = (i / para.kernel[1]) * para.stride[1];
+        for (int j = 0; j < H; j += h) {
+            // intermediate load and transpose
+            cobra::slice<int>(&in_l, &inter, {0, 0, 0}, {0, j, i});
+            vector<int>tmp_in;
+            strided<int>(0, 0, {h * rem, 1, rem}, {1, rem, h}, tmp_in, in_l.data);
+
+            // final out load and transpose
+            cobra::slice<int>(&out_l, &out_g, {0, 0, 0}, {0, j, offset_c_out});
+            vector<int>tmp_out;
+            strided<int>(0, 0, {h * out_c, 1, out_c}, {1, out_c, h}, tmp_out, out_l.data);
+
+            // cfunc call
+            maxpool_cfunc(tmp_out.data(), tmp_in.data(), 1, out_c, h,
+                  para.dilated_kernel[1],
+                  para.stride[1], para.dilation[1], para.kernel[1], para);
+            
+            // tranpose and store output
+            vector<int>out;
+            strided<int>(0, 0, {h * out_c, 1, h}, {1, h, out_c}, out, tmp_out.data());
+            cobra::mdspan<int> output{out.data(), {1, h, out_c}};
+            cobra::slice<int>(&out_g, &output, {0, j, offset_c_out});
+        }
+    }
+
     print(&in_g, 1);
+    print(&inter, 1);
     print(&out_g, 1);
-
-    // int W, H, C;
-    // W = output_g_shape[0];
-    // H = output_g_shape[1];
-    // C = output_g_shape[2];
-
-    // // /*------------------- MDSPAN SETUP -------------------*/
-    // // cobra::mdspan<int> in_l{in_l1_mem.data(), input_l_shape};
-    // cobra::mdspan<int> in_g{src.data(), input_g_shape};
-    // print(&in_g, 1);
-
-    // cobra::mdspan<int> out_g{dst.data(), output_g_shape};
-    // cobra::mdspan<int> temp{dst.data(), {1, output_g_shape[1], input_g_shape[2]}};
-
-    // maxpool_cfunc(temp.data, in_g.data, 1, output_g_shape[1], input_g_shape[2],
-    //               para.dilated_kernel[0],
-    //               para.stride[0], para.dilation[0], para.kernel[0], para);
-    // print(&temp, 1);
-    
-    // vector<int> trans_mem;
-    // vector<int> s = {1, input_g_shape[2], output_g_shape[1]};
-
-    // H = output_g_shape[1];
-    // C = input_g_shape[2];
-    
-    // strided<int>(0, 0, {H * C, 1, C}, {1, C, H}, trans_mem, temp.data);
-
-    // cobra::mdspan<int> trans{trans_mem.data(), s};
-    // print(&trans, 1);
-
-    // int out = (s[1] / para.kernel[1] - 1) * para.stride[1] + para.dilated_kernel[1];
-    // cout <<"\nout:" << out << "\n";
-
-    // vector<int> final_out(100000, 0);
-    // maxpool_cfunc(final_out.data(), trans.data, 1, out, s[2], para.dilated_kernel[1],
-    //               para.stride[1], para.dilation[1], para.kernel[1], para);
-    
-    // vector<int> new_mem;
-    // H = output_g_shape[1];
-    // C = output_g_shape[2];
-    // strided<int>(0, 0, {H * C, 1, H}, output_g_shape, new_mem, final_out.data());
-    // cobra::mdspan<int> final{new_mem.data(), output_g_shape};
-    // print(&final, 1);
-
-    // print(&trans, 1);
-    // (const vector<T1>& dst_st, const vector<T1>& src_st,
-    //          const vector<T1>& dst_sh, const vector<T1>& src_sh,
-    //          T2 *out, T2 *in, vector<int> dst_offset = {},
-    //          vector<int> src_offset = {})
-
-    // /******************************************************/
-    // int w, h, c;
-    // w = input_l_shape[0];
-    // h = input_l_shape[1];
-    // c = input_l_shape[2];
-
-    // /*----- Initialize l1 shape and sub input offsets -----*/
-    // int l1off_j, l1off_k;
-    // int goff_j, goff_k;
-    // int step_j = ALIGNDOWN((h - para.dilated_kernel[0]), para.stride[0]);
-    // int step_k = ALIGNDOWN((c - para.dilated_kernel[1]), para.stride[1]);
-    // int jump_j = step_j / para.stride[0] + 1;
-    // int jump_k = step_k / para.stride[1] + 1;
-    // h = step_j + para.dilated_kernel[0];
-    // c = step_k + para.dilated_kernel[1];
-    // step_j += para.stride[0];
-    // step_k += para.stride[1];
-
-    // /*---------- return shape corresponding to output ------------*/
-    // get_out_shape(output_l_shape, w, h, c, para);
-    // mdspan<int> out_l{out_l1_mem.data(), output_l_shape};
-
-    // for (int i = 0; i < W; i += w) {
-    //     for (int j = 0, j_out = 0; j < H; j += step_j, j_out += jump_j) {
-    //         /*---------------- SETTING J(private and global) OFFSET TO HANDLE PADDING ----------*/
-    //         set_in_offset_after_padding(l1off_j, goff_j, para.padding[0], j);
-
-    //         for (int k = 0, k_out = 0; k < C; k += step_k, k_out += jump_k){
-    //             /*------------ SETTING k(private and global) OFFSET TO HANDLE PADDING ----------*/
-    //             set_in_offset_after_padding(l1off_k, goff_k, para.padding[1], k);
-
-    //             //global -> private slicing
-    //             cobra::mdspan<int> input{in_l1_mem.data(), {w, h, c}};
-    //             cobra::slice(&input, &in_g, {0, l1off_j, l1off_k}, {i, goff_j, goff_k});
-
-    //             /*-------------------- cfunc call ---------------------*/
-    //             maxpool_cfunc(out_l.data, input.data, w, h, c, para);
-
-    //             // private -> global slicing
-    //             cobra::slice<int>(&out_g, &out_l, {i, j_out, k_out},
-    //                                                {0, 0, 0});
-    //         }
-    //     }
-    // }
     /******************************************************/
     return 0;
 }
