@@ -228,8 +228,8 @@ void set_op_para(op_para &para) {
     para.dilation[1] = 1;
     para.dilated_kernel[0] = para.dilation[0] * (para.kernel[0] - 1) + 1;
     para.dilated_kernel[1] = para.dilation[1] * (para.kernel[1] - 1) + 1;
-    para.padding[0] = 0;
-    para.padding[1] = 0;
+    para.padding[0] = 1;
+    para.padding[1] = 1;
 }
 
 void get_in_shape(vector<int>&in_shape, int W, int H, int C, op_para para) {
@@ -262,8 +262,8 @@ int main() {
     /*------------------- SHAPES -------------------------*/
     vector<int> output_g_shape = {1, 4, 4};
 
-    int sliding_window = ceil((output_g_shape[1] - para.dilated_kernel[0] + 1.0f) / para.stride[0]);
-    int sliding_window2 = ceil((output_g_shape[2] - para.dilated_kernel[1] + 1.0f) / para.stride[1]);
+    int sliding_window = ceil((output_g_shape[1] + 2 * para.padding[0] - para.dilated_kernel[0] + 1.0f) / para.stride[0]);
+    int sliding_window2 = ceil((output_g_shape[2] + 2 * para.padding[1] - para.dilated_kernel[1] + 1.0f) / para.stride[1]);
     vector<int> input_g_shape = {1, sliding_window * para.kernel[0], sliding_window2 * para.kernel[1]};
     vector<int> inter_shape = {1, output_g_shape[1], input_g_shape[2]};
 
@@ -280,24 +280,36 @@ int main() {
     int pre = 0;
 
     print(vector<int>{H, C}, 1);
+    int p = 0;
+    int rem = 0;
+    int out_off = 0;
+
     for (int i = 0; i < H; i += h) {
         int rem = H - i > h? h: H - i;
         int out_h = (rem / para.kernel[0] - 1) * para.stride[0] + para.dilated_kernel[0];
         cobra::mdspan<int> in_l{in_l1_mem.data(), {1, rem, c}};
         cobra::mdspan<int> out_l{out_l1_mem.data(), {1, out_h, c}};
         int offset_h_out = (i / para.kernel[0]) * para.stride[0];
+        p = std::max(para.padding[0] - i, 0);
+        out_off = std::max(offset_h_out - para.padding[0], 0);
         for (int j = 0; j < C; j += c) {
             cobra::slice<int>(&in_l, &in_g, {0, 0, 0}, {0, i, j});
-            cobra::slice<int>(&out_l, &inter, {0, 0, 0}, {0, offset_h_out, j});
+            if (rem > 0)
+            cobra::slice<int>(&out_l, &inter, {0, p, 0}, {0, out_off, j});
+            
             maxpool_cfunc(out_l.data, in_l.data, 1, out_h, c,
                   para.dilated_kernel[0],
                   para.stride[0], para.dilation[0], para.kernel[0], para);
-            cobra::slice<int>(&inter, &out_l, {0, offset_h_out, j});
+            cobra::slice<int>(&inter, &out_l, {0, out_off, j}, {0, p, 0});
         }
+        rem = para.dilated_kernel[0] - para.stride[0];
     }
 
     h = 128, c = para.kernel[1] * 2;
     H = output_g_shape[1];
+    p = 0;
+    out_off = 0;
+    rem = 0;
 
     // sync thread
 
@@ -307,6 +319,8 @@ int main() {
         cobra::mdspan<int> in_l{in_l1_mem.data(), {1, h, rem}};
         cobra::mdspan<int> out_l{out_l1_mem.data(), {1, h, out_c}};
         int offset_c_out = (i / para.kernel[1]) * para.stride[1];
+        p = std::max(para.padding[1] - i, 0);
+        out_off = std::max(offset_c_out - para.padding[1], 0);
         for (int j = 0; j < H; j += h) {
             // intermediate load and transpose
             cobra::slice<int>(&in_l, &inter, {0, 0, 0}, {0, j, i});
@@ -314,9 +328,11 @@ int main() {
             strided<int>(0, 0, {h * rem, 1, rem}, {1, rem, h}, tmp_in, in_l.data);
 
             // final out load and transpose
-            cobra::slice<int>(&out_l, &out_g, {0, 0, 0}, {0, j, offset_c_out});
             vector<int>tmp_out;
-            strided<int>(0, 0, {h * out_c, 1, out_c}, {1, out_c, h}, tmp_out, out_l.data);
+            if (rem > 0) {
+                cobra::slice<int>(&out_l, &out_g, {0, 0, p}, {0, j, out_off});
+                strided<int>(0, 0, {h * out_c, 1, out_c}, {1, out_c, h}, tmp_out, out_l.data);
+            }
 
             // cfunc call
             maxpool_cfunc(tmp_out.data(), tmp_in.data(), 1, out_c, h,
@@ -327,8 +343,9 @@ int main() {
             vector<int>out;
             strided<int>(0, 0, {h * out_c, 1, h}, {1, h, out_c}, out, tmp_out.data());
             cobra::mdspan<int> output{out.data(), {1, h, out_c}};
-            cobra::slice<int>(&out_g, &output, {0, j, offset_c_out});
+            cobra::slice<int>(&out_g, &output, {0, j, out_off}, {0, 0, p});
         }
+        rem = para.dilated_kernel[1] - para.stride[1];
     }
 
     print(&in_g, 1);
